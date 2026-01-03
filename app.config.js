@@ -1,4 +1,5 @@
-{
+export default 
+  {
   "expo": {
     "name": "pet_adopt_app",
     "slug": "pet_adopt_app",
@@ -53,4 +54,6 @@
       }
     }
   }
+
+
 }

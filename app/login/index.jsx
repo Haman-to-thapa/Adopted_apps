@@ -58,7 +58,7 @@ export default function Login() {
     <SafeAreaView style={styles.container}>
       <View style={styles.heroContainer}>
         <Image
-          source={require("../../assets/images/login.png")}
+          source={require("../../assets/images/login.webp")}
           style={styles.heroImage}
           resizeMode="cover"
         />
