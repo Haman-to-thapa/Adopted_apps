@@ -17,9 +17,11 @@ import { useRouter } from 'expo-router';
 import { collection, getDocs, addDoc } from 'firebase/firestore';
 import { db } from '../../config/FirebaseConfig';
 import Colors from '../../constants/Colors';
+import { useUser } from '@clerk/clerk-expo'; // IMPORTANT: Added this import
 
 const Index = () => {
   const router = useRouter();
+  const { user } = useUser(); // IMPORTANT: Get the logged-in user
 
   const [image, setImage] = useState(null);
   const [categoryList, setCategoryList] = useState([]);
@@ -40,6 +42,26 @@ const Index = () => {
     ownerContact: '',
     ownerAddress: '',
   });
+
+  // Pre-fill user data when component loads
+  useEffect(() => {
+    getCategories();
+
+    // Pre-fill form with user data if available
+    if (user) {
+      const userName = user.username || user.fullName || user.firstName || '';
+      const userEmail = user.primaryEmailAddress?.emailAddress || '';
+
+      setForm(prev => ({
+        ...prev,
+        username: prev.username || userName || '',
+        ownerName: prev.ownerName || userName || '',
+        // You can pre-fill other fields if needed
+      }));
+
+      console.log('User logged in:', { userName, userEmail });
+    }
+  }, [user]);
 
   const handleChange = (key, value) => {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -94,10 +116,6 @@ const Index = () => {
     }
   };
 
-  useEffect(() => {
-    getCategories();
-  }, []);
-
   /* ---------------- SUBMIT TO FIREBASE ---------------- */
   const handleSubmit = async () => {
     // Validation
@@ -121,12 +139,28 @@ const Index = () => {
       return;
     }
 
+    // Check if user is logged in
+    if (!user) {
+      Alert.alert('Authentication Required', 'Please sign in to add a pet');
+      return;
+    }
+
+    // Get user information
+    const userEmail = user.primaryEmailAddress?.emailAddress;
+    const userName = user.username || user.fullName || user.firstName || 'User';
+    const userId = user.id;
+
+    if (!userEmail) {
+      Alert.alert('Error', 'User email not found. Please update your profile.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
       const petData = {
+        // Basic pet information
         name: form.name.trim(),
-        username: form.username.trim(),
         breed: form.breed.trim(),
         age: form.age.trim(),
         weight: form.weight.trim(),
@@ -135,26 +169,68 @@ const Index = () => {
         price: form.price.trim(),
         address: form.address.trim(),
         about: form.about.trim(),
-        ownerName: form.ownerName.trim(),
-        ownerContact: form.ownerContact.trim(),
-        ownerAddress: form.ownerAddress.trim(),
         imageUrl: image,
         postedDate: new Date().toISOString(),
         status: 'available',
+
+        // USER IDENTIFICATION FIELDS (CRITICAL FOR LINKING PETS TO USERS)
+        userId: userId, // Clerk user ID
+        userEmail: userEmail, // User's email
+        username: form.username.trim() || userName, // Use form username or Clerk username
+
+        // Owner information
+        ownerName: form.ownerName.trim() || userName,
+        ownerContact: form.ownerContact.trim(),
+        ownerAddress: form.ownerAddress.trim(),
       };
 
-      console.log('Submitting pet data:', petData);
+      console.log('Submitting pet data with user info:', {
+        userId: petData.userId,
+        userEmail: petData.userEmail,
+        username: petData.username
+      });
 
       // Add to Firebase
       const docRef = await addDoc(collection(db, 'Pets'), petData);
-      console.log('Pet added with ID:', docRef.id);
+      console.log('Pet added with ID:', docRef.id, 'for user:', userEmail);
 
+      // Success alert with options
       Alert.alert(
-        'Success!',
-        'Pet has been added successfully.',
+        'Success! 🎉',
+        'Pet has been added successfully to your account.',
         [
           {
-            text: 'OK',
+            text: 'View My Pets',
+            onPress: () => {
+              // Navigate to user posts page
+              router.push('/user-posts');
+            }
+          },
+          {
+            text: 'Add Another Pet',
+            onPress: () => {
+              // Reset form for another pet
+              setForm({
+                name: '',
+                username: form.username || userName, // Keep username
+                breed: '',
+                age: '',
+                weight: '',
+                sex: '',
+                category: 'None',
+                price: '',
+                address: '',
+                about: '',
+                ownerName: form.ownerName || userName, // Keep owner name
+                ownerContact: '',
+                ownerAddress: '',
+              });
+              setImage(null);
+              setIsSubmitting(false);
+            }
+          },
+          {
+            text: 'Done',
             onPress: () => router.back()
           }
         ]
@@ -213,6 +289,21 @@ const Index = () => {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+
+        {/* USER INFO DISPLAY (Optional - shows who's uploading) */}
+        {user && (
+          <View style={styles.userInfoSection}>
+            <Text style={styles.userInfoText}>
+              Uploading as: <Text style={styles.userInfoHighlight}>
+                {user.username || user.fullName || user.firstName}
+              </Text>
+            </Text>
+            <Text style={styles.userInfoEmail}>
+              {user.primaryEmailAddress?.emailAddress}
+            </Text>
+          </View>
+        )}
+
         {/* IMAGE UPLOAD */}
         <View style={styles.imageSection}>
           <Text style={styles.sectionLabel}>Pet Image *</Text>
@@ -249,6 +340,7 @@ const Index = () => {
             placeholder="Enter username"
             value={form.username}
             onChangeText={v => handleChange('username', v)}
+            helperText="This will be displayed as the pet owner's name"
           />
           <Input
             label="Breed"
@@ -313,6 +405,7 @@ const Index = () => {
             value={form.price}
             keyboardType="numeric"
             onChangeText={v => handleChange('price', v)}
+            helperText="Enter 0 or leave empty for free adoption"
           />
           <Input
             label="Address"
@@ -358,12 +451,21 @@ const Index = () => {
         <TouchableOpacity
           style={[styles.submitBtn, isSubmitting && styles.submitBtnDisabled]}
           onPress={handleSubmit}
-          disabled={isSubmitting}
+          disabled={isSubmitting || !user} // Disable if not logged in
         >
           <Text style={styles.submitBtnText}>
-            {isSubmitting ? 'Adding Pet...' : 'Submit Pet'}
+            {!user ? 'Please Sign In' : isSubmitting ? 'Adding Pet...' : 'Submit Pet'}
           </Text>
         </TouchableOpacity>
+
+        {!user && (
+          <TouchableOpacity
+            style={styles.signInBtn}
+            onPress={() => router.push('/sign-in')}
+          >
+            <Text style={styles.signInBtnText}>Sign In to Add Pets</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.footerSpace} />
       </ScrollView>
@@ -374,7 +476,7 @@ const Index = () => {
 export default Index;
 
 /* ---------------- INPUT COMPONENT ---------------- */
-const Input = ({ label, placeholder, value, onChangeText, multiline, numberOfLines, keyboardType }) => (
+const Input = ({ label, placeholder, value, onChangeText, multiline, numberOfLines, keyboardType, helperText }) => (
   <View style={styles.inputContainer}>
     <Text style={styles.inputLabel}>{label}</Text>
     <TextInput
@@ -387,6 +489,7 @@ const Input = ({ label, placeholder, value, onChangeText, multiline, numberOfLin
       keyboardType={keyboardType}
       placeholderTextColor={Colors.GRAY}
     />
+    {helperText && <Text style={styles.helperText}>{helperText}</Text>}
   </View>
 );
 
@@ -415,6 +518,31 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontFamily: 'outfit-semibold',
     color: Colors.DARK,
+  },
+  userInfoSection: {
+    backgroundColor: Colors.LIGHT_PRIMARY,
+    marginHorizontal: 20,
+    marginTop: 15,
+    marginBottom: 10,
+    padding: 12,
+    borderRadius: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.PRIMARY,
+  },
+  userInfoText: {
+    fontSize: 14,
+    fontFamily: 'outfit-medium',
+    color: Colors.DARK_GRAY,
+  },
+  userInfoHighlight: {
+    color: Colors.PRIMARY,
+    fontWeight: 'bold',
+  },
+  userInfoEmail: {
+    fontSize: 12,
+    fontFamily: 'outfit-regular',
+    color: Colors.GRAY,
+    marginTop: 3,
   },
   section: {
     marginBottom: 20,
@@ -492,6 +620,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.DARK_GRAY,
     marginBottom: 5,
+  },
+  helperText: {
+    fontSize: 12,
+    fontFamily: 'outfit-regular',
+    color: Colors.GRAY,
+    marginTop: 4,
+    marginLeft: 5,
   },
   input: {
     borderWidth: 1,
@@ -601,6 +736,19 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   submitBtnText: {
+    color: Colors.WHITE,
+    fontFamily: 'outfit-semibold',
+    fontSize: 16,
+  },
+  signInBtn: {
+    marginHorizontal: 20,
+    marginTop: 10,
+    paddingVertical: 16,
+    backgroundColor: Colors.SECONDARY,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  signInBtnText: {
     color: Colors.WHITE,
     fontFamily: 'outfit-semibold',
     fontSize: 16,

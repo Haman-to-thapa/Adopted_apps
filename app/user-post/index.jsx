@@ -2,7 +2,7 @@ import { StyleSheet, Text, View, FlatList, Image, TouchableOpacity, ActivityIndi
 import React, { useEffect, useState } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useNavigation, useRouter } from 'expo-router'
-import { collection, getDocs, query, where } from 'firebase/firestore'
+import { collection, getDocs, query, where, deleteDoc, doc } from 'firebase/firestore'
 import { db } from '../../config/FirebaseConfig'
 import { useUser } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
@@ -13,6 +13,7 @@ const UserPosts = () => {
   const { user } = useUser()
   const [userPostList, setUserPostList] = useState([])
   const [loading, setLoading] = useState(true)
+  const [deletingId, setDeletingId] = useState(null)
 
   useEffect(() => {
     navigation.setOptions({
@@ -53,13 +54,19 @@ const UserPosts = () => {
       setLoading(true)
       setUserPostList([])
 
-      if (!user?.primaryEmailAddress?.emailAddress) {
+      if (!user) {
         setLoading(false)
         return
       }
 
-      const userEmail = user.primaryEmailAddress.emailAddress
-      const q = query(collection(db, 'Pets'), where('email', '==', userEmail))
+      const username = user.username || user.fullName || user.firstName
+
+      if (!username) {
+        setLoading(false)
+        return
+      }
+
+      const q = query(collection(db, 'Pets'), where('username', '==', username))
       const querySnapshot = await getDocs(q)
 
       const posts = []
@@ -73,9 +80,44 @@ const UserPosts = () => {
       setUserPostList(posts)
       setLoading(false)
     } catch (error) {
-      console.error('Error fetching user posts:', error)
       Alert.alert('Error', 'Failed to load your pets')
       setLoading(false)
+    }
+  }
+
+  const handleDeletePet = (petId, petName) => {
+    Alert.alert(
+      'Delete Pet',
+      `Are you sure you want to delete "${petName}"? This action cannot be undone.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => deletePet(petId)
+        }
+      ]
+    )
+  }
+
+  const deletePet = async (petId) => {
+    try {
+      setDeletingId(petId)
+
+      const petRef = doc(db, 'Pets', petId)
+      await deleteDoc(petRef)
+
+      // Remove from local state
+      setUserPostList(prevList => prevList.filter(pet => pet.id !== petId))
+
+      Alert.alert('Success', 'Pet deleted successfully')
+    } catch (error) {
+      Alert.alert('Error', 'Failed to delete pet. Please try again.')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -90,75 +132,89 @@ const UserPosts = () => {
   }
 
   const renderPetItem = ({ item }) => (
-    <TouchableOpacity
-      style={styles.petCard}
-      onPress={() => router.push({
-        pathname: '/pet-details',
-        params: {
-          id: item.id,
-          name: item.name,
-          breed: item.breed,
-          age: item.age,
-          sex: item.sex,
-          price: item.price,
-          address: item.address,
-          category: item.category,
-          imageUrl: item.imageUrl,
-          about: item.about,
-          postedDate: item.postedDate,
-          username: item.username,
-          userImage: item.userImage,
-        }
-      })}
-      activeOpacity={0.7}
-    >
-      <Image
-        source={{ uri: item.imageUrl || 'https://via.placeholder.com/150' }}
-        style={styles.petImage}
-      />
+    <View style={styles.petCard}>
+      <TouchableOpacity
+        style={styles.petInfoContainer}
+        onPress={() => router.push({
+          pathname: '/pet-details',
+          params: {
+            id: item.id,
+            name: item.name,
+            breed: item.breed,
+            age: item.age,
+            sex: item.sex,
+            price: item.price,
+            address: item.address,
+            category: item.category,
+            imageUrl: item.imageUrl,
+            about: item.about,
+            postedDate: item.postedDate,
+            username: item.username,
+            userImage: item.userImage,
+          }
+        })}
+        activeOpacity={0.7}
+      >
+        <Image
+          source={{ uri: item.imageUrl || 'https://via.placeholder.com/150' }}
+          style={styles.petImage}
+        />
 
-      <View style={styles.petInfo}>
-        <View style={styles.petHeader}>
-          <Text style={styles.petName} numberOfLines={1}>
-            {item.name}
+        <View style={styles.petInfo}>
+          <View style={styles.petHeader}>
+            <Text style={styles.petName} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={styles.petPrice}>
+              ${item.price || 'Free'}
+            </Text>
+          </View>
+
+          <Text style={styles.petBreed} numberOfLines={1}>
+            {item.breed || 'Mixed Breed'}
           </Text>
-          <Text style={styles.petPrice}>
-            ${item.price || 'Free'}
-          </Text>
+
+          <View style={styles.petDetails}>
+            <View style={styles.detailItem}>
+              <Ionicons name="calendar-outline" size={14} color="#666" />
+              <Text style={styles.detailText}>{item.age} years</Text>
+            </View>
+
+            <View style={styles.detailItem}>
+              <Ionicons
+                name={item.sex?.toLowerCase() === 'female' ? 'female-outline' : 'male-outline'}
+                size={14}
+                color="#666"
+              />
+              <Text style={styles.detailText}>{item.sex || 'Unknown'}</Text>
+            </View>
+
+            <View style={styles.detailItem}>
+              <Ionicons name="paw-outline" size={14} color="#666" />
+              <Text style={styles.detailText}>{item.category || 'Pet'}</Text>
+            </View>
+          </View>
+
+          {item.postedDate && (
+            <Text style={styles.postedDate}>
+              Posted on {formatDate(item.postedDate)}
+            </Text>
+          )}
         </View>
+      </TouchableOpacity>
 
-        <Text style={styles.petBreed} numberOfLines={1}>
-          {item.breed || 'Mixed Breed'}
-        </Text>
-
-        <View style={styles.petDetails}>
-          <View style={styles.detailItem}>
-            <Ionicons name="calendar-outline" size={14} color="#666" />
-            <Text style={styles.detailText}>{item.age} years</Text>
-          </View>
-
-          <View style={styles.detailItem}>
-            <Ionicons
-              name={item.sex?.toLowerCase() === 'female' ? 'female-outline' : 'male-outline'}
-              size={14}
-              color="#666"
-            />
-            <Text style={styles.detailText}>{item.sex || 'Unknown'}</Text>
-          </View>
-
-          <View style={styles.detailItem}>
-            <Ionicons name="paw-outline" size={14} color="#666" />
-            <Text style={styles.detailText}>{item.category || 'Pet'}</Text>
-          </View>
-        </View>
-
-        {item.postedDate && (
-          <Text style={styles.postedDate}>
-            Posted on {formatDate(item.postedDate)}
-          </Text>
+      <TouchableOpacity
+        style={[styles.deleteButton, deletingId === item.id && styles.deleteButtonDisabled]}
+        onPress={() => handleDeletePet(item.id, item.name)}
+        disabled={deletingId === item.id}
+      >
+        {deletingId === item.id ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <Ionicons name="trash-outline" size={18} color="#fff" />
         )}
-      </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </View>
   )
 
   if (loading) {
@@ -202,6 +258,8 @@ const UserPosts = () => {
               </Text>
             </View>
           }
+          refreshing={loading}
+          onRefresh={GetUserPost}
         />
       )}
     </SafeAreaView>
@@ -269,6 +327,10 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  petInfoContainer: {
+    flex: 1,
+    flexDirection: 'row',
+  },
   petImage: {
     width: 100,
     height: 100,
@@ -321,6 +383,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999',
     fontStyle: 'italic',
+  },
+  deleteButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FF3B30',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 14,
+    alignSelf: 'center',
+  },
+  deleteButtonDisabled: {
+    backgroundColor: '#FF7F7F',
   },
   emptyContainer: {
     flex: 1,
